@@ -1,0 +1,54 @@
+[package]
+name = "tinkoff-acquiring"
+version = "0.2.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Rust-клиент к API Tinkoff (T-Банк) Acquiring: Init/GetState/Confirm/Cancel/Charge, карты, клиенты, FinishAuthorize, QR; retry, идемпотентность, webhook-валидация."
+readme = "README.md"
+repository = "https://github.com/andysay1/tinkoff-acquiring"
+homepage = "https://github.com/andysay1/tinkoff-acquiring"
+documentation = "https://docs.rs/tinkoff-acquiring"
+keywords = ["tinkoff", "payments", "acquiring", "tbank", "api"]
+categories = ["api-bindings", "web-programming::http-client", "finance"]
+authors = ["Your Name <you@example.com>"]
+rust-version = "1.74" # MSRV
+
+# включаем только нужные файлы в пакет
+include = [
+  "src/**",
+  "examples/**",
+  "README.md",
+  "LICENSE*",
+  "Cargo.toml",
+]
+
+[lib]
+name = "tinkoff_acquiring"
+path = "src/lib.rs"
+
+[features]
+default = ["rustls", "backoff"]
+rustls = []
+blocking = ["reqwest/blocking", "backoff"]
+
+[dependencies]
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "1"
+tracing = "0.1"
+backoff = { version = "0.4", features = ["tokio"], optional = true }
+
+# для примеров/тестов
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+anyhow = "1"
+serde_json = "1"
+actix-web = "4"
+axum = "0.7"
+httpmock = "0.7"
+
+[package.metadata.docs.rs]
+all-features = true
+no-default-features = false
