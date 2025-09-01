@@ -1,17 +1,18 @@
 # tinkoff-acquiring
 
-Rust-клиент к Tinkoff Acquiring (Касса) REST API v2.
+Rust-клиент к [Tinkoff (T-Банк) Acquiring REST API v2](https://www.tbank.ru/business/documents/oplata-api/).
 
 ## Возможности
 
--   Инициализация платежа `Init`, `GetState`, `Confirm`, `Cancel`, `Charge`
+-   Инициализация платежа: `Init`, `GetState`, `Confirm`, `Cancel`, `Charge`
 -   Работа с клиентами: `AddCustomer`, `GetCustomer`, `RemoveCustomer`
 -   Карты: `GetCardList`, `RemoveCard`
--   Привязка/3DS: `BindCard`, `FinishAuthorize`
+-   Привязка и 3DS: `BindCard`, `FinishAuthorize`
 -   QR: `GetQr`
 -   Верификация вебхука (токен только по корневым полям)
--   Ретраи (экспоненциальный backoff), идемпотентные ключи (через заголовок)
--   `blocking`-режим (фича)
+-   Ретраи с экспоненциальным backoff
+-   Идемпотентные ключи через заголовок
+-   `blocking`-режим (опция через feature)
 
 ## Быстрый старт
 
@@ -28,7 +29,13 @@ let receipt = Receipt {
   email: Some("buyer@example.com".into()),
   phone: None,
   taxation: Taxation::Osn,
-  items: vec![Item { name: "Hoodie".into(), price: 199_900, quantity: 1.0, amount: 199_900, tax: Tax::Vat20 }],
+  items: vec![Item {
+      name: "Hoodie".into(),
+      price: 199_900,
+      quantity: 1.0,
+      amount: 199_900,
+      tax: Tax::Vat20,
+  }],
   currency: None,
 };
 
@@ -44,6 +51,7 @@ let init = client.init(
   None,
   Some("order-123-key"), // идемпотентность
 ).await?;
+
 println!("Payment URL: {:?}", init.payment_url);
 # Ok(()) }
 ```
