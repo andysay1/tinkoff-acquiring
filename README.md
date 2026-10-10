@@ -35,7 +35,7 @@ tinkoff-acquiring = "0.3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-Минимальная версия Rust — 1.85.
+Минимальная версия Rust — 1.88.
 
 ## Быстрый старт
 

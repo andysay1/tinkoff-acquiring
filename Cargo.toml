@@ -2,7 +2,7 @@
 name = "tinkoff-acquiring"
 version = "0.3.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 description = "Полный Rust-клиент интернет-эквайринга Т-Банка (Tinkoff Acquiring API v2): платежи, чеки ФФД 1.05/1.2, рекурренты, привязка карт, 3DS, СБП, T-Pay, SberPay, Mir Pay, Alfa Pay, проверка уведомлений."
 readme = "README.md"
