@@ -1,98 +1,137 @@
-#[cfg(feature = "blocking")]
-pub mod blocking {
-    use crate::types::*;
-    use backoff::{retry, ExponentialBackoff};
-    use reqwest::blocking::{Client, ClientBuilder};
-    use reqwest::header::{HeaderMap, HeaderName, HeaderValue, USER_AGENT};
-    use std::time::Duration;
+//! Синхронный клиент (feature `blocking`).
+//!
+//! Методы те же, что у асинхронного [`crate::Client`]. Не создавайте и не
+//! используйте его внутри async-рантайма — там нужен асинхронный клиент.
+//!
+//! ```no_run
+//! use tinkoff_acquiring::{blocking, GetState};
+//!
+//! let client = blocking::Client::new("TerminalKey", "Password")?;
+//! let state = client.get_state(&GetState::new("1234567890"))?;
+//! println!("{}", state.status);
+//! # Ok::<(), tinkoff_acquiring::Error>(())
+//! ```
 
-    #[derive(Clone)]
-    pub struct TinkoffBlocking {
-        http: Client,
-        cfg: Config,
-    }
+use crate::api::*;
+use crate::client::{api_methods, ClientBuilder};
+use crate::error::{Error, Result};
+use crate::notification::{Notification, NotificationError, NotificationVerifier};
+use crate::request::Request;
+use crate::transport::{self, Body, Shared};
+use serde_json::{Map, Value};
+use std::fmt;
+use std::sync::Arc;
 
-    impl TinkoffBlocking {
-        pub fn new(cfg: Config) -> Self {
-            let mut headers = HeaderMap::new();
-            if let Some(ua) = &cfg.user_agent {
-                headers.insert(
-                    USER_AGENT,
-                    HeaderValue::from_str(ua).unwrap_or(HeaderValue::from_static("tinkoff-acq")),
-                );
-            }
-            let http = ClientBuilder::new()
-                .default_headers(headers)
-                .timeout(Duration::from_millis(cfg.timeout_ms))
-                .build()
-                .expect("reqwest blocking client");
-            Self { http, cfg }
-        }
+/// Синхронный клиент API.
+#[derive(Clone)]
+pub struct Client {
+    http: reqwest::blocking::Client,
+    shared: Arc<Shared>,
+}
 
-        #[inline]
-        fn url(&self, path: &str) -> String {
-            format!("{}/v2/{}", self.cfg.base.trim_end_matches('/'), path)
-        }
-
-        fn post_json<T: serde::Serialize, R: for<'de> serde::Deserialize<'de>>(
-            &self,
-            path: &str,
-            body: &T,
-            idempotence_key: Option<&str>,
-        ) -> Result<R> {
-            let url = self.url(path);
-            let mut req = self.http.post(url).json(body);
-            if let (Some(hname), Some(key)) = (&self.cfg.idempotence_header, idempotence_key) {
-                if let Ok(name) = HeaderName::from_bytes(hname.as_bytes()) {
-                    req = req.header(name, key);
-                }
-            }
-
-            let backoff = ExponentialBackoff {
-                initial_interval: Duration::from_millis(self.cfg.initial_backoff_ms),
-                max_elapsed_time: Some(Duration::from_millis(self.cfg.initial_backoff_ms * 20)),
-                max_interval: Duration::from_secs(3),
-                ..ExponentialBackoff::default()
-            };
-
-            let op = || {
-              let req_cloned = req
-                    .try_clone()
-                    .ok_or_else(|| backoff::Error::permanent(Error::Api {
-                        code: None,
-                        message: Some("failed to clone request".into()),
-                    }))?;
-
-                let resp = req_cloned
-                    .send()
-                    .map_err(|e| backoff::Error::transient(Error::Http(e)))?;
-
-
-                let status = resp.status();
-                if status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                    return Err(backoff::Error::transient(Error::Api {
-                        code: None,
-                        message: Some(format!("server {}", status)),
-                    }));
-                }
-
-                let resp = resp
-                    .error_for_status()
-                    .map_err(|e| backoff::Error::permanent(Error::Http(e)))?;
-
-                let out = resp
-                    .json::<R>()
-                    .map_err(|e| backoff::Error::permanent(Error::Http(e)))?;
-                Ok(out)
-            };
-
-            match retry(backoff, op) {
-                Ok(v) => Ok(v),
-                Err(backoff::Error::Permanent(e)) => Err(e),
-                Err(backoff::Error::Transient { err: e, .. }) => Err(e),
-            }
-        }
-
-        // При необходимости — добавить sync-методы init/get_state/... поверх post_json(...)
+impl fmt::Debug for Client {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.shared.fmt(f)
     }
 }
+
+impl Client {
+    /// Клиент боевого API с настройками по умолчанию.
+    pub fn new(terminal_key: impl Into<String>, password: impl Into<String>) -> Result<Self> {
+        ClientBuilder::new(terminal_key, password).build_blocking()
+    }
+
+    /// Настройка клиента; завершите вызовом [`ClientBuilder::build_blocking`].
+    pub fn builder(terminal_key: impl Into<String>, password: impl Into<String>) -> ClientBuilder {
+        ClientBuilder::new(terminal_key, password)
+    }
+
+    pub(crate) fn from_parts(http: reqwest::blocking::Client, shared: Arc<Shared>) -> Self {
+        Self { http, shared }
+    }
+
+    /// `TerminalKey` клиента.
+    pub fn terminal_key(&self) -> &str {
+        &self.shared.terminal_key
+    }
+
+    /// Базовый URL API.
+    pub fn base_url(&self) -> &str {
+        &self.shared.base_url
+    }
+
+    /// Проверка уведомлений с реквизитами этого клиента.
+    pub fn notifications(&self) -> NotificationVerifier {
+        NotificationVerifier::new(&self.shared.terminal_key, &self.shared.password)
+    }
+
+    /// Проверить подпись и `TerminalKey` уведомления и разобрать его.
+    pub fn parse_notification(
+        &self,
+        body: &[u8],
+    ) -> std::result::Result<Notification, NotificationError> {
+        self.notifications().verify(body)
+    }
+
+    /// Выполнить любой запрос.
+    pub fn execute<R: Request>(&self, req: &R) -> Result<R::Response> {
+        let prepared = self.shared.prepare(req)?;
+        self.send(prepared)
+    }
+
+    /// Вызвать метод, которого нет в библиотеке.
+    pub fn execute_raw(&self, path: &str, body: Map<String, Value>) -> Result<Value> {
+        let prepared = self.shared.prepare_raw(path, body)?;
+        self.send(prepared)
+    }
+
+    fn send<T: serde::de::DeserializeOwned>(&self, p: transport::Prepared) -> Result<T> {
+        let retry = self.shared.retry;
+        let mut attempt = 0u32;
+        loop {
+            let rb = match &p.body {
+                Body::Json(v) => self.http.post(&p.url).json(v),
+                Body::Form(f) => self.http.post(&p.url).form(f),
+                Body::Empty => self.http.get(&p.url),
+            };
+            tracing::debug!(method = p.name, attempt, "запрос к API Т-Банка");
+            match rb.send() {
+                Ok(resp) => {
+                    let status = resp.status().as_u16();
+                    if attempt < retry.max_retries && transport::retry_status(status, p.retry_safe)
+                    {
+                        tracing::warn!(method = p.name, http = status, attempt, "повтор запроса");
+                        std::thread::sleep(retry.delay(attempt));
+                        attempt += 1;
+                        continue;
+                    }
+                    let bytes = resp.bytes()?;
+                    return transport::decode(p.name, status, &bytes);
+                }
+                Err(e) => {
+                    if attempt < retry.max_retries && transport::retry_transport(&e, p.retry_safe) {
+                        tracing::warn!(method = p.name, error = %e, attempt, "повтор запроса");
+                        std::thread::sleep(retry.delay(attempt));
+                        attempt += 1;
+                        continue;
+                    }
+                    return Err(Error::Transport(e));
+                }
+            }
+        }
+    }
+}
+
+macro_rules! blocking_methods {
+    ($( $(#[$m:meta])* $name:ident($req:ty) -> $resp:ty; )*) => {
+        impl Client {
+            $(
+                $(#[$m])*
+                pub fn $name(&self, req: &$req) -> Result<$resp> {
+                    self.execute(req)
+                }
+            )*
+        }
+    };
+}
+api_methods!(blocking_methods);
