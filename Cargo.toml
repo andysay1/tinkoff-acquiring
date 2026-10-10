@@ -1,54 +1,62 @@
 [package]
 name = "tinkoff-acquiring"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
+rust-version = "1.88"
 license = "MIT OR Apache-2.0"
-description = "Rust-клиент к API Tinkoff (T-Банк) Acquiring: Init/GetState/Confirm/Cancel/Charge, карты, клиенты, FinishAuthorize, QR; retry, идемпотентность, webhook-валидация."
+description = "Полный Rust-клиент интернет-эквайринга Т-Банка (Tinkoff Acquiring API v2): платежи, чеки ФФД 1.05/1.2, рекурренты, привязка карт, 3DS, СБП, T-Pay, SberPay, Mir Pay, Alfa Pay, проверка уведомлений."
 readme = "README.md"
 repository = "https://github.com/andysay1/tinkoff-acquiring"
 homepage = "https://github.com/andysay1/tinkoff-acquiring"
 documentation = "https://docs.rs/tinkoff-acquiring"
-keywords = ["tinkoff", "payments", "acquiring", "tbank", "api"]
+keywords = ["tinkoff", "tbank", "acquiring", "payments", "sbp"]
 categories = ["api-bindings", "web-programming::http-client", "finance"]
-authors = ["Your Name <you@example.com>"]
-rust-version = "1.74" # MSRV
-
-# включаем только нужные файлы в пакет
 include = [
   "src/**",
+  "certs/**",
   "examples/**",
+  "tests/**",
   "README.md",
+  "CHANGELOG.md",
   "LICENSE*",
   "Cargo.toml",
 ]
 
-[lib]
-name = "tinkoff_acquiring"
-path = "src/lib.rs"
-
 [features]
-default = ["rustls", "backoff"]
-rustls = []
-blocking = ["reqwest/blocking", "backoff"]
+default = ["rustls", "russian-trusted-ca"]
+# TLS через rustls (поведение reqwest по умолчанию: системная проверка сертификатов).
+rustls = ["reqwest/rustls"]
+# TLS через системную библиотеку (OpenSSL / SChannel / SecureTransport).
+# На macOS SecureTransport не принимает цепочку Минцифры — используйте rustls.
+# Если включены обе TLS-фичи, используется rustls.
+native-tls = ["reqwest/native-tls"]
+# Доверять корневому сертификату НУЦ Минцифры (Russian Trusted Root CA) —
+# только для HTTP-клиента этой библиотеки. API Т-Банка переходит на эти сертификаты.
+russian-trusted-ca = []
+# Синхронный клиент `blocking::Client`.
+blocking = ["reqwest/blocking"]
 
 [dependencies]
-reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "form", "http2", "system-proxy"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sha2 = "0.10"
-thiserror = "1"
+serde_json = { version = "1", features = ["raw_value"] }
+sha2 = "0.11"
+base64 = "0.23"
+thiserror = "2"
 tracing = "0.1"
-backoff = { version = "0.4", features = ["tokio"], optional = true }
+tokio = { version = "1", features = ["time"] }
 
-# для примеров/тестов
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 anyhow = "1"
-serde_json = "1"
+wiremock = "0.6"
+axum = "0.8"
 actix-web = "4"
-axum = "0.7"
-httpmock = "0.7"
+
+[[example]]
+name = "blocking"
+required-features = ["blocking"]
 
 [package.metadata.docs.rs]
 all-features = true
-no-default-features = false
+rustdoc-args = ["--cfg", "docsrs"]
